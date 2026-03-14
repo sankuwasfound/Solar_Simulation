@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EV Power Grid — Advanced Simulation</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --c0:#060810;--c1:#0c0f1e;--c2:#111528;--c3:#181c32;--c4:#1f2440;
+  --solar:#fbbf24;--solar2:#f97316;--bat:#06d6a0;--bat2:#0891b2;
+  --ev:#818cf8;--ev2:#a78bfa;--grid:#fb7185;--sun:#fde68a;
+  --hi:#e0f2fe;--t1:#f0f4ff;--t2:#8892b0;--t3:#4a5568;
+  --glow-s:0 0 20px rgba(251,191,36,.4);--glow-b:0 0 20px rgba(6,214,160,.4);
+  --glow-e:0 0 20px rgba(129,140,248,.4);--glow-g:0 0 20px rgba(251,113,133,.3);
+  --r:12px;--r-sm:8px;
+}
+html,body{width:100%;min-height:100vh;background:var(--c0);color:var(--t1);font-family:'Segoe UI',system-ui,sans-serif;overflow-x:hidden}
+
+/* ── GRID BACKGROUND ── */
+body::before{content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(129,140,248,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(129,140,248,.03) 1px,transparent 1px);
+  background-size:40px 40px;pointer-events:none;z-index:0}
+
+.page{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:16px 16px 60px}
+
+/* ── HEADER ── */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 0 14px;border-bottom:1px solid rgba(129,140,248,.15);margin-bottom:16px}
+.hdr-left{display:flex;align-items:center;gap:14px}
+.hdr-icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,var(--solar),var(--solar2));display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:var(--glow-s);flex-shrink:0}
+.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.01em;color:var(--t1)}
+.hdr-sub{font-size:11px;color:var(--t2);margin-top:2px;letter-spacing:.04em}
+.hdr-right{display:flex;align-items:center;gap:10px}
+.chip{font-size:10px;font-weight:700;letter-spacing:.1em;padding:4px 10px;border-radius:20px;border:1px solid;text-transform:uppercase}
+.chip-sim{color:var(--bat);border-color:rgba(6,214,160,.4);background:rgba(6,214,160,.06)}
+.chip-time{color:var(--t2);border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-family:'Courier New',monospace;font-size:13px;letter-spacing:.1em;padding:4px 12px}
+
+/* ── SCENE CANVAS ── */
+.scene-wrap{position:relative;width:100%;height:280px;border-radius:var(--r);overflow:hidden;border:1px solid rgba(129,140,248,.15);margin-bottom:14px;background:var(--c1)}
+#sceneCanvas{position:absolute;inset:0;width:100%;height:100%}
+.scene-overlay{position:absolute;inset:0;background:linear-gradient(to bottom,transparent 60%,var(--c0) 100%);pointer-events:none}
+.scene-labels{position:absolute;bottom:12px;left:0;right:0;display:flex;justify-content:space-around;pointer-events:none}
+.scene-lbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t2);text-align:center;opacity:.7}
+
+/* ── CONTROLS BAR ── */
+.ctrl-bar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--c2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);margin-bottom:14px;flex-wrap:wrap}
+.hour-big{font-family:'Courier New',monospace;font-size:26px;font-weight:700;color:var(--solar);min-width:72px;text-shadow:var(--glow-s)}
+.ctrl-progress{flex:1;min-width:120px;display:flex;flex-direction:column;gap:4px}
+.prog-track{height:5px;background:var(--c4);border-radius:3px;overflow:hidden;position:relative}
+.prog-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--solar),var(--bat),var(--ev));width:0%;transition:width .4s ease}
+.prog-labels{display:flex;justify-content:space-between}
+.prog-lbl{font-size:9px;color:var(--t3);letter-spacing:.06em}
+.btn-group{display:flex;gap:6px;align-items:center}
+.btn{cursor:pointer;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:var(--t1);border-radius:var(--r-sm);padding:6px 14px;font-size:12px;font-weight:600;transition:all .15s;white-space:nowrap}
+.btn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
+.btn-play{border-color:rgba(6,214,160,.5);color:var(--bat);background:rgba(6,214,160,.07)}
+.btn-play:hover{background:rgba(6,214,160,.12);box-shadow:var(--glow-b)}
+.btn-play.paused{border-color:rgba(251,191,36,.5);color:var(--solar);background:rgba(251,191,36,.07)}
+
+.weather-sel{background:var(--c3);border:1px solid rgba(255,255,255,.1);color:var(--t1);border-radius:var(--r-sm);padding:5px 10px;font-size:12px;cursor:pointer;outline:none}
+.weather-sel option{background:var(--c2)}
+.ctrl-sep{width:1px;height:28px;background:rgba(255,255,255,.07);flex-shrink:0}
+
+/* ── MAIN CANVAS (flow diagram) ── */
+.flow-wrap{position:relative;border-radius:var(--r);overflow:hidden;border:1px solid rgba(129,140,248,.12);margin-bottom:14px;background:var(--c1)}
+#flowCanvas{display:block;width:100%}
+.flow-corner{position:absolute;width:8px;height:8px;border-color:rgba(129,140,248,.4);border-style:solid}
+.flow-corner.tl{top:6px;left:6px;border-width:1px 0 0 1px}
+.flow-corner.tr{top:6px;right:6px;border-width:1px 1px 0 0}
+.flow-corner.bl{bottom:6px;left:6px;border-width:0 0 1px 1px}
+.flow-corner.br{bottom:6px;right:6px;border-width:0 1px 1px 0}
+
+/* ── STATS ROW ── */
+.stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--c2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);padding:12px 14px;position:relative;overflow:hidden;transition:border-color .3s}
+.stat::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;border-radius:0 0 var(--r) var(--r);transition:opacity .3s}
+.stat.s-solar::after{background:var(--solar);opacity:.6}
+.stat.s-bat::after{background:var(--bat);opacity:.6}
+.stat.s-ev::after{background:var(--ev);opacity:.6}
+.stat.s-grid::after{background:var(--grid);opacity:.6}
+.stat.s-total::after{background:linear-gradient(90deg,var(--solar),var(--bat));opacity:.6}
+.stat-label{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-bottom:6px}
+.stat-val{font-size:22px;font-weight:800;line-height:1;transition:color .3s}
+.stat-unit{font-size:11px;font-weight:400;color:var(--t2);margin-left:2px}
+.stat-sub{font-size:10px;color:var(--t3);margin-top:4px}
+.stat-bar{height:3px;background:var(--c4);border-radius:2px;overflow:hidden;margin-top:8px}
+.stat-bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
+
+/* ── TWO EV BAYS ── */
+.evbays{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.ev-bay{background:var(--c2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);padding:14px 16px;transition:border-color .4s,box-shadow .4s}
+.ev-bay.active{border-color:rgba(129,140,248,.4);box-shadow:var(--glow-e)}
+.ev-bay.charging{border-color:rgba(6,214,160,.4);box-shadow:var(--glow-b)}
+.evbay-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.evbay-name{font-size:13px;font-weight:700;color:var(--t1)}
+.evbay-status{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:20px}
+.evbay-status.s-disc{color:var(--t3);border:1px solid var(--t3);background:transparent}
+.evbay-status.s-conn{color:var(--ev);border:1px solid rgba(129,140,248,.5);background:rgba(129,140,248,.07)}
+.evbay-status.s-chrg{color:var(--bat);border:1px solid rgba(6,214,160,.4);background:rgba(6,214,160,.07);animation:pulse-status 1.5s ease-in-out infinite}
+.evbay-status.s-full{color:var(--solar);border:1px solid rgba(251,191,36,.4);background:rgba(251,191,36,.07)}
+@keyframes pulse-status{0%,100%{opacity:1}50%{opacity:.6}}
+.ev-soc-bar-wrap{height:10px;background:var(--c4);border-radius:5px;overflow:hidden;margin-bottom:8px;position:relative}
+.ev-soc-bar{height:100%;border-radius:5px;transition:width .5s ease;background:linear-gradient(90deg,var(--ev),var(--ev2))}
+.ev-soc-bar.full{background:linear-gradient(90deg,var(--solar),#fb923c)}
+.ev-soc-text{font-size:22px;font-weight:800;color:var(--ev);transition:color .3s}
+.ev-soc-sub{font-size:11px;color:var(--t2);margin-top:2px}
+.ev-row{display:flex;align-items:baseline;gap:6px;margin-bottom:6px}
+.ev-eta{font-size:10px;color:var(--t3);margin-top:4px}
+canvas.ev-spark{display:block;width:100%;height:40px;margin-top:6px}
+
+/* ── CHARTS ── */
+.charts-row{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:14px}
+.chart-card{background:var(--c2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);padding:14px 16px}
+.chart-card-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.chart-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* ── LOG FEED ── */
+.log-card{background:var(--c2);border:1px solid rgba(255,255,255,.06);border-radius:var(--r);padding:14px 16px;max-height:200px;overflow-y:auto}
+.log-card::-webkit-scrollbar{width:4px}
+.log-card::-webkit-scrollbar-thumb{background:var(--c4);border-radius:2px}
+.log-entry{font-size:11px;font-family:'Courier New',monospace;color:var(--t3);padding:3px 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;gap:8px}
+.log-entry:last-child{color:var(--t2)}
+.log-time{color:var(--ev);min-width:44px;flex-shrink:0}
+.log-entry.ev-event .log-time{color:var(--bat)}
+.log-entry.ev-event{color:var(--bat)}
+.log-entry.warn .log-time{color:var(--solar)}
+.log-entry.warn{color:var(--solar)}
+
+/* ── NOTIFICATION ── */
+.notif{position:fixed;top:20px;right:20px;min-width:260px;max-width:320px;background:var(--c3);border:1px solid;border-radius:var(--r);padding:12px 16px;z-index:999;transform:translateX(120%);transition:transform .4s cubic-bezier(.34,1.56,.64,1)}
+.notif.show{transform:translateX(0)}
+.notif-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.notif-sub{font-size:11px;color:var(--t2)}
+
+/* ── BOTTOM SUMMARY ── */
+.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)}
+.sum-item{text-align:center}
+.sum-val{font-size:18px;font-weight:800;margin-bottom:2px}
+.sum-lbl{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+
+@keyframes glow-pulse{0%,100%{opacity:.6}50%{opacity:1}}
+@media(max-width:700px){.stats-row{grid-template-columns:repeat(3,1fr)}.charts-row{grid-template-columns:1fr}.evbays{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="hdr-icon">⚡</div>
+    <div>
+      <div class="hdr-title">Remote EV Power Station — Live Simulation</div>
+      <div class="hdr-sub">HARDWARE-1 · SOLAR ARRAY · MPPT REGULATOR · DUAL BAY · STATIONARY STORAGE</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <span class="chip chip-sim" id="sim-status-chip">● READY</span>
+    <span class="chip chip-time" id="chip-time">00:00</span>
+  </div>
+</div>
+
+<!-- SCENE (sky / sun / environment) -->
+<div class="scene-wrap">
+  <canvas id="sceneCanvas"></canvas>
+  <div class="scene-overlay"></div>
+  <div class="scene-labels">
+    <div class="scene-lbl" id="lbl-irr">0% irradiance</div>
+    <div class="scene-lbl" id="lbl-weather">Clear</div>
+    <div class="scene-lbl" id="lbl-temp">24°C</div>
+    <div class="scene-lbl" id="lbl-gen">0.00 kW</div>
+  </div>
+</div>
+
+<!-- CONTROLS -->
+<div class="ctrl-bar">
+  <div>
+    <div class="hour-big" id="hour-big">00:00</div>
+    <div style="font-size:9px;color:var(--t3);letter-spacing:.08em;margin-top:1px">HOUR</div>
+  </div>
+  <div class="ctrl-progress">
+    <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+    <div class="prog-labels">
+      <span class="prog-lbl">00:00</span>
+      <span class="prog-lbl">06:00</span>
+      <span class="prog-lbl">12:00</span>
+      <span class="prog-lbl">18:00</span>
+      <span class="prog-lbl">23:00</span>
+    </div>
+  </div>
+  <div class="ctrl-sep"></div>
+  <div class="btn-group">
+    <button class="btn btn-play" id="play-btn" onclick="togglePlay()">▶ PLAY</button>
+    <button class="btn" onclick="resetSim()" style="color:var(--t3);font-size:11px">↺ RESET</button>
+  </div>
+  <div class="ctrl-sep"></div>
+  <select class="weather-sel" id="weather-sel" onchange="changeWeather()">
+    <option value="clear">☀ Clear Sky</option>
+    <option value="partly">⛅ Partly Cloudy</option>
+    <option value="cloudy">☁ Overcast</option>
+    <option value="stormy">⛈ Stormy</option>
+  </select>
+
+</div>
+
+<!-- FLOW DIAGRAM CANVAS -->
+<div class="flow-wrap">
+  <div class="flow-corner tl"></div><div class="flow-corner tr"></div>
+  <div class="flow-corner bl"></div><div class="flow-corner br"></div>
+  <canvas id="flowCanvas"></canvas>
+</div>
+
+<!-- STATS ROW -->
+<div class="stats-row">
+  <div class="stat s-solar">
+    <div class="stat-label">☀ Solar Output</div>
+    <div class="stat-val" id="sv-solar" style="color:var(--solar)">0.00<span class="stat-unit">kW</span></div>
+    <div class="stat-sub" id="ss-solar">0% irradiance</div>
+    <div class="stat-bar"><div class="stat-bar-fill" id="sb-solar" style="background:var(--solar);width:0%"></div></div>
+  </div>
+  <div class="stat s-bat">
+    <div class="stat-label">🔋 Battery SoC</div>
+    <div class="stat-val" id="sv-bat" style="color:var(--bat)">30.0<span class="stat-unit">%</span></div>
+    <div class="stat-sub" id="ss-bat">6.0 / 20.0 kWh</div>
+    <div class="stat-bar"><div class="stat-bar-fill" id="sb-bat" style="background:var(--bat);width:30%"></div></div>
+  </div>
+  <div class="stat s-ev">
+    <div class="stat-label">⚡ Active Power</div>
+    <div class="stat-val" id="sv-active" style="color:var(--ev)">0.0<span class="stat-unit">kW</span></div>
+    <div class="stat-sub" id="ss-active">No active flow</div>
+    <div class="stat-bar"><div class="stat-bar-fill" id="sb-active" style="background:var(--ev);width:0%"></div></div>
+  </div>
+  <div class="stat s-grid">
+    <div class="stat-label">📊 Efficiency</div>
+    <div class="stat-val" id="sv-eff" style="color:var(--grid)">97<span class="stat-unit">%</span></div>
+    <div class="stat-sub">Regulator η</div>
+    <div class="stat-bar"><div class="stat-bar-fill" id="sb-eff" style="background:var(--grid);width:97%"></div></div>
+  </div>
+  <div class="stat s-total">
+    <div class="stat-label">∑ Total Gen.</div>
+    <div class="stat-val" id="sv-total" style="color:var(--solar)">0.0<span class="stat-unit">kWh</span></div>
+    <div class="stat-sub" id="ss-total">This cycle</div>
+    <div class="stat-bar"><div class="stat-bar-fill" id="sb-total" style="background:linear-gradient(90deg,var(--solar),var(--bat));width:0%"></div></div>
+  </div>
+</div>
+
+<!-- EV BAYS -->
+<div class="evbays">
+  <div class="ev-bay" id="bay0">
+    <div class="evbay-top">
+      <div>
+        <div class="evbay-name" id="bay0-name">Bay A — Tesla Model 3</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:1px">60 kWh · 7.4 kW max</div>
+      </div>
+      <span class="evbay-status s-disc" id="bay0-status">DISCONNECTED</span>
+    </div>
+    <div class="ev-row">
+      <span class="ev-soc-text" id="bay0-soc">12.0</span>
+      <span style="font-size:14px;color:var(--t2)">%</span>
+      <span style="font-size:11px;color:var(--t2);margin-left:6px" id="bay0-kwh">7.2 kWh</span>
+    </div>
+    <div class="ev-soc-bar-wrap"><div class="ev-soc-bar" id="bay0-bar" style="width:12%"></div></div>
+    <div class="ev-eta" id="bay0-eta">Arrives at 09:00 · Departs 17:00</div>
+    <canvas class="ev-spark" id="spark0" height="40"></canvas>
+  </div>
+  <div class="ev-bay" id="bay1">
+    <div class="evbay-top">
+      <div>
+        <div class="evbay-name" id="bay1-name">Bay B — BMW iX3</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:1px">74 kWh · 11 kW max</div>
+      </div>
+      <span class="evbay-status s-disc" id="bay1-status">DISCONNECTED</span>
+    </div>
+    <div class="ev-row">
+      <span class="ev-soc-text" id="bay1-soc">8.0</span>
+      <span style="font-size:14px;color:var(--t2)">%</span>
+      <span style="font-size:11px;color:var(--t2);margin-left:6px" id="bay1-kwh">5.9 kWh</span>
+    </div>
+    <div class="ev-soc-bar-wrap"><div class="ev-soc-bar" id="bay1-bar" style="width:8%"></div></div>
+    <div class="ev-eta" id="bay1-eta">Arrives at 11:00 · Departs 16:00</div>
+    <canvas class="ev-spark" id="spark1" height="40"></canvas>
+  </div>
+</div>
+
+<!-- CHARTS + LOG -->
+<div class="charts-row">
+  <div class="chart-card">
+    <div class="chart-card-label">
+      <span class="chart-dot" style="background:var(--solar)"></span> Solar Generation &amp; Power Flows — 24h
+    </div>
+    <canvas id="mainChart" height="170"></canvas>
+  </div>
+  <div class="chart-card" style="display:flex;flex-direction:column">
+    <div class="chart-card-label"><span class="chart-dot" style="background:var(--ev)"></span> State of Charge</div>
+    <canvas id="socChart" style="flex:1"></canvas>
+  </div>
+</div>
+<div class="chart-card" style="margin-bottom:14px">
+  <div class="chart-card-label"><span class="chart-dot" style="background:var(--grid)"></span> Event Log</div>
+  <div class="log-card" id="log-feed">
+    <div class="log-entry"><span class="log-time">--:--</span><span>System initialised. Ready to simulate.</span></div>
+  </div>
+</div>
+
+<!-- SUMMARY -->
+<div class="summary">
+  <div class="sum-item"><div class="sum-val" id="sum-solar" style="color:var(--solar)">0.0 kWh</div><div class="sum-lbl">Total Solar</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-ev" style="color:var(--ev)">0.0 kWh</div><div class="sum-lbl">Delivered to EVs</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-bat" style="color:var(--bat)">0.0 kWh</div><div class="sum-lbl">Stored in Battery</div></div>
+  <div class="sum-item"><div class="sum-val" id="sum-eff" style="color:var(--grid)">— %</div><div class="sum-lbl">System Efficiency</div></div>
+</div>
+
+</div><!-- end .page -->
+
+<!-- NOTIFICATION -->
+<div class="notif" id="notif">
+  <div class="notif-title" id="notif-title">Event</div>
+  <div class="notif-sub" id="notif-sub">—</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// WEATHER PROFILES
+// ═══════════════════════════════════════════════════════════════════
+const PROFILES = {
+  clear:  {name:'Clear Sky',   mult:[0,0,0,0,0,.02,.09,.22,.44,.64,.83,.97,1.0,.97,.88,.73,.53,.32,.13,.05,0,0,0,0]},
+  partly: {name:'Partly Cloudy',mult:[0,0,0,0,0,.01,.06,.14,.28,.40,.55,.65,.70,.62,.55,.44,.32,.18,.07,.02,0,0,0,0]},
+  cloudy: {name:'Overcast',    mult:[0,0,0,0,0,.005,.03,.07,.14,.20,.27,.32,.34,.31,.28,.22,.15,.09,.03,.01,0,0,0,0]},
+  stormy: {name:'Stormy',      mult:[0,0,0,0,0,0,.01,.03,.07,.09,.12,.14,.15,.12,.10,.08,.05,.02,.01,0,0,0,0,0]},
+};
+let weatherKey = 'clear';
+function irr(h){ return PROFILES[weatherKey].mult[h]; }
+
+// ═══════════════════════════════════════════════════════════════════
+// SIMULATION STATE
+// ═══════════════════════════════════════════════════════════════════
+const SOLAR_PEAK=6.0, SOLAR_EFF=0.85, REG_EFF=0.97;
+const BAT_CAP=20.0, BAT_IN=4.0, BAT_OUT=4.0, BAT_RTE=0.92, BAT_RESERVE=0.10;
+const EVS=[
+  {name:'Tesla Model 3', cap:60, maxKW:7.4,  initSoc:.12, arrive:9,  depart:17},
+  {name:'BMW iX3',       cap:74, maxKW:11.0, initSoc:.08, arrive:11, depart:16},
+];
+let batE, evE, evConn, hour, logs, playing, speed, timer, totSolar, totToEV, totToBat;
+function resetState(){
+  batE      = BAT_CAP*.30;
+  evE       = EVS.map(e=>e.cap*e.initSoc);
+  evConn    = [false,false];
+  hour      = 0;
+  logs      = [];
+  playing   = false;
+  speed     = 3;
+  totSolar  = 0; totToEV = 0; totToBat = 0;
+  clearInterval(timer); timer=null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SIMULATION STEP
+// ═══════════════════════════════════════════════════════════════════
+function step(){
+  if(hour>=24){pause();showNotif('✅ Cycle Complete',`${totSolar.toFixed(1)} kWh generated · EVs charged`,'#fbbf24');return;}
+
+  EVS.forEach((ev,i)=>{
+    if(hour===ev.arrive){evConn[i]=true; showNotif(`🔌 ${ev.name} connected (Bay ${['A','B'][i]})`,`Arrived at ${(evE[i]/ev.cap*100).toFixed(1)}% SoC`,'#818cf8'); addLog(`${ev.name} plugged in → Bay ${['A','B'][i]} (${(evE[i]/ev.cap*100).toFixed(1)}% SoC)`,'ev-event');}
+    if(hour===ev.depart){showNotif(`🚗 ${ev.name} unplugged`,`Departed at ${(evE[i]/ev.cap*100).toFixed(1)}% SoC`,'#06d6a0'); evConn[i]=false; addLog(`${ev.name} unplugged → ${(evE[i]/ev.cap*100).toFixed(1)}% SoC`,'ev-event');}
+  });
+
+  const solarRaw=SOLAR_PEAK*irr(hour)*SOLAR_EFF;
+  let   rem=solarRaw*REG_EFF;
+  const toEV=[0,0]; let toBat=0, fromBat=0;
+
+  // P1 + P2: round-robin EVs first
+  EVS.forEach((ev,i)=>{
+    if(!evConn[i]||evE[i]>=ev.cap) return;
+    const give=Math.min(rem,ev.maxKW);
+    const actual=Math.min(give,ev.cap-evE[i]);
+    evE[i]+=actual; evE[i]=Math.min(evE[i],ev.cap);
+    toEV[i]+=actual; rem-=actual;
+  });
+
+  // P3: excess to battery
+  if(rem>.01&&batE<BAT_CAP){
+    const give=Math.min(rem,BAT_IN);
+    const maxIn=(BAT_CAP-batE)/BAT_RTE;
+    const eIn=Math.min(give,maxIn);
+    batE+=eIn*BAT_RTE; batE=Math.min(batE,BAT_CAP);
+    toBat+=eIn; rem-=eIn;
+  }
+
+  // P4: battery supplement EVs
+  EVS.forEach((ev,i)=>{
+    if(!evConn[i]||evE[i]>=ev.cap) return;
+    const deficit=ev.maxKW-toEV[i];
+    if(deficit<.01||(batE/BAT_CAP-BAT_RESERVE)<=0) return;
+    const draw=Math.min(deficit,BAT_OUT);
+    const avail=batE*BAT_RTE;
+    const out=Math.min(draw,avail);
+    batE-=out/BAT_RTE; batE=Math.max(batE,0);
+    const add=Math.min(out,ev.cap-evE[i]);
+    evE[i]+=add; toEV[i]+=add; fromBat+=out;
+  });
+
+  totSolar+=solarRaw; totToEV+=toEV[0]+toEV[1]; totToBat+=toBat;
+  const log={hour,solarRaw,toEV:[...toEV],toBat,fromBat,batSoc:batE/BAT_CAP*100,evSoc:EVS.map((e,i)=>evE[i]/e.cap*100),evConn:[...evConn]};
+  logs.push(log);
+  pushCharts(log);
+  renderFlow(log);
+  updateStats(log);
+  updateEVBays(log);
+  updateScene(log);
+  updateSummary();
+  if(solarRaw>.1&&Math.random()<.15) addLog(`Solar: ${solarRaw.toFixed(2)} kW · Bat: ${log.batSoc.toFixed(0)}% · Flow: ${(toEV[0]+toEV[1]+toBat).toFixed(1)} kW`);
+  hour++;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SCENE CANVAS — sky, sun, environment
+// ═══════════════════════════════════════════════════════════════════
+const sceneC=document.getElementById('sceneCanvas');
+const sctx=sceneC.getContext('2d');
+let clouds=[], stars=[], sceneFrame=0;
+function initScene(){
+  sceneC.width=sceneC.offsetWidth; sceneC.height=sceneC.offsetHeight;
+  stars=Array.from({length:80},()=>({x:Math.random()*sceneC.width,y:Math.random()*sceneC.height*.5,r:Math.random()*1.2+.3,a:Math.random()}));
+  clouds=Array.from({length:6},()=>newCloud());
+}
+function newCloud(){return{x:Math.random()*sceneC.width,y:Math.random()*sceneC.height*.45+10,w:Math.random()*120+60,h:Math.random()*40+20,spd:Math.random()*.2+.05,a:Math.random()*.6+.2};}
+function drawScene(h, solarKW){
+  const W=sceneC.width, H=sceneC.height;
+  const dayFrac=h/24;
+  const irrVal=irr(Math.min(h,23));
+
+  // Sky gradient
+  let sky1,sky2;
+  if(irrVal<.02){sky1='#000005';sky2='#0a0a1a';}
+  else if(irrVal<.1){sky1='#0d1b2a';sky2='#1a2a4a';}
+  else if(irrVal<.5){sky1='#0c2461';sky2='#4a6fa5';}
+  else{sky1='#1a56a0';sky2='#54a0e0';}
+  if(weatherKey==='stormy'){sky1='#1a1a2e';sky2='#2d3561';}
+  else if(weatherKey==='cloudy'){sky1='#1e2a3a';sky2='#2e4a6a';}
+  const g=sctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,sky1); g.addColorStop(1,sky2);
+  sctx.fillStyle=g; sctx.fillRect(0,0,W,H);
+
+  // Stars (night only)
+  if(irrVal<.08){
+    stars.forEach(s=>{
+      sctx.beginPath();sctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+      sctx.fillStyle=`rgba(255,255,255,${s.a*(1-irrVal*12)})`;sctx.fill();
+    });
+  }
+
+  // Sun
+  if(irrVal>.01){
+    const sunX=W*.15+W*.7*(h/23);
+    const sunY=H*.8-H*.65*Math.sin(Math.PI*(h-5)/14)*Math.max(0,1-(Math.abs(h-12)/7));
+    const sunR=irrVal>0 ? 16+irrVal*14 : 0;
+    // glow
+    const gSun=sctx.createRadialGradient(sunX,sunY,0,sunX,sunY,sunR*4);
+    gSun.addColorStop(0,`rgba(255,220,50,${irrVal*.5})`);
+    gSun.addColorStop(.4,`rgba(255,160,30,${irrVal*.25})`);
+    gSun.addColorStop(1,'transparent');
+    sctx.fillStyle=gSun;sctx.fillRect(sunX-sunR*4,sunY-sunR*4,sunR*8,sunR*8);
+    // core
+    sctx.beginPath();sctx.arc(sunX,sunY,sunR,0,Math.PI*2);
+    sctx.fillStyle=`rgba(255,230,80,${Math.min(1,irrVal*1.5)})`;sctx.fill();
+    // rays
+    for(let i=0;i<8;i++){
+      const a=sceneFrame*.012+i*Math.PI/4;
+      const r1=sunR+4, r2=sunR+8+irrVal*12;
+      sctx.beginPath();
+      sctx.moveTo(sunX+Math.cos(a)*r1,sunY+Math.sin(a)*r1);
+      sctx.lineTo(sunX+Math.cos(a)*r2,sunY+Math.sin(a)*r2);
+      sctx.strokeStyle=`rgba(255,220,80,${irrVal*.6})`;
+      sctx.lineWidth=1.5;sctx.stroke();
+    }
+    // solar beam to panel indicator
+    if(irrVal>.1){
+      sctx.beginPath();
+      for(let i=0;i<3;i++){
+        const bx=sunX+20+(i*30),by=sunY+10+(i*10);
+        sctx.moveTo(bx,by);sctx.lineTo(bx+40,by+15);
+      }
+      sctx.strokeStyle=`rgba(255,220,80,${irrVal*.15})`;
+      sctx.lineWidth=1;sctx.stroke();
+    }
+  }
+
+  // Clouds
+  if(weatherKey!=='clear'){
+    const cloudAmt={partly:.4,cloudy:.75,stormy:.9}[weatherKey]||0;
+    clouds.forEach((c,i)=>{
+      c.x+=c.spd; if(c.x>W+c.w) c.x=-c.w;
+      sctx.beginPath();
+      sctx.ellipse(c.x,c.y,c.w*.5,c.h*.4,0,0,Math.PI*2);
+      sctx.ellipse(c.x-c.w*.2,c.y+c.h*.1,c.w*.35,c.h*.32,0,0,Math.PI*2);
+      sctx.ellipse(c.x+c.w*.25,c.y+c.h*.08,c.w*.3,c.h*.28,0,0,Math.PI*2);
+      const cc=weatherKey==='stormy'?`rgba(40,40,70,${c.a*cloudAmt})`:`rgba(200,220,240,${c.a*cloudAmt})`;
+      sctx.fillStyle=cc;sctx.fill();
+    });
+    // Rain drops for stormy
+    if(weatherKey==='stormy'&&sceneFrame%4===0){
+      for(let i=0;i<15;i++){
+        const rx=Math.random()*W, ry=Math.random()*H;
+        sctx.beginPath();sctx.moveTo(rx,ry);sctx.lineTo(rx-2,ry+8);
+        sctx.strokeStyle='rgba(150,180,220,.4)';sctx.lineWidth=1;sctx.stroke();
+      }
+    }
+  }
+
+  // Ground / horizon
+  const gnd=sctx.createLinearGradient(0,H*.65,0,H);
+  gnd.addColorStop(0,irrVal>.1?'rgba(16,24,40,.7)':'rgba(5,8,20,.9)');
+  gnd.addColorStop(1,'rgba(6,8,16,1)');
+  sctx.fillStyle=gnd;sctx.fillRect(0,H*.65,W,H*.35);
+
+  // Solar panels silhouette on ground
+  const panelX=W*.35, panelY=H*.68;
+  for(let i=0;i<4;i++){
+    const px=panelX+i*38, py=panelY-i*4;
+    sctx.save();sctx.translate(px,py);sctx.rotate(-.35);
+    sctx.fillStyle=irrVal>.05?`rgba(30,50,100,${.6+irrVal*.3})`:'rgba(20,30,60,.5)';
+    sctx.fillRect(-18,-8,36,14);
+    if(irrVal>.1){
+      sctx.strokeStyle=`rgba(${Math.floor(irrVal*200)},${Math.floor(irrVal*120)},20,.6)`;
+      sctx.lineWidth=.5;
+      sctx.strokeRect(-18,-8,36,14);
+      sctx.beginPath();sctx.moveTo(-18,-1);sctx.lineTo(18,-1);
+      sctx.moveTo(0,-8);sctx.lineTo(0,6);
+      sctx.stroke();
+    }
+    sctx.restore();
+  }
+
+  // Power level bars overlay
+  if(solarKW>0){
+    const bx=10, bw=6, bmax=H*.4;
+    for(let i=0;i<3;i++){
+      const bh=(solarKW/SOLAR_PEAK)*bmax*(1-i*.08);
+      sctx.fillStyle=`rgba(251,191,36,${.15+i*.05})`;
+      sctx.fillRect(bx+i*(bw+3),H-10-bh,bw,bh);
+    }
+  }
+
+  document.getElementById('lbl-irr').textContent=`${(irr(Math.min(hour,23))*100).toFixed(0)}% irradiance`;
+  document.getElementById('lbl-weather').textContent=PROFILES[weatherKey].name;
+  document.getElementById('lbl-temp').textContent=`${(24+irr(Math.min(hour,23))*18).toFixed(0)}°C`;
+  document.getElementById('lbl-gen').textContent=solarKW.toFixed(2)+' kW generating';
+  sceneFrame++;
+}
+
+// Scene animation loop
+let sceneRAF;
+function startSceneLoop(){
+  function loop(){
+    sceneRAF=requestAnimationFrame(loop);
+    const sKW=logs.length?logs[logs.length-1].solarRaw:0;
+    drawScene(hour, sKW);
+  }
+  loop();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FLOW DIAGRAM CANVAS
+// ═══════════════════════════════════════════════════════════════════
+const flowC=document.getElementById('flowCanvas');
+const fctx=flowC.getContext('2d');
+let particles=[];
+
+const NODES={
+  solar: {x:.12,y:.22,w:.18,h:.36,label:'SOLAR\nARRAY',sub:'6kW peak',color:'#fbbf24',glow:'rgba(251,191,36,.3)'},
+  reg:   {x:.38,y:.22,w:.23,h:.36,label:'POWER\nREGULATOR',sub:'MPPT · 97%η',color:'#818cf8',glow:'rgba(129,140,248,.3)'},
+  bat:   {x:.64,y:.05,w:.20,h:.36,label:'SYSTEM\nBATTERY',sub:'20kWh LFP',color:'#06d6a0',glow:'rgba(6,214,160,.3)'},
+  ev0:   {x:.64,y:.52,w:.16,h:.28,label:'BAY A',sub:'Tesla · 60kWh',color:'#818cf8',glow:'rgba(129,140,248,.3)'},
+  ev1:   {x:.81,y:.52,w:.16,h:.28,label:'BAY B',sub:'BMW · 74kWh',color:'#a78bfa',glow:'rgba(167,139,250,.3)'},
+};
+
+// Active flow channels
+let flowState={sToR:false,rToBat:false,rToEV0:false,rToEV1:false,batToEV:false};
+
+function resizeFlow(){
+  flowC.width=flowC.offsetWidth;
+  const H=Math.round(flowC.width*.38);
+  flowC.height=H; flowC.style.height=H+'px';
+}
+
+function node(k){
+  const n=NODES[k], W=flowC.width, H=flowC.height;
+  return{x:n.x*W,y:n.y*H,w:n.w*W,h:n.h*H,cx:n.x*W+n.w*W/2,cy:n.y*H+n.h*H/2};
+}
+
+function drawRoundRect(ctx,x,y,w,h,r,fill,stroke,glow,glowColor){
+  if(glow){ctx.shadowColor=glowColor;ctx.shadowBlur=18;}
+  ctx.beginPath();ctx.roundRect(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke();}
+  ctx.shadowBlur=0;
+}
+
+function drawNode(k,soc,active){
+  const n=NODES[k], nd=node(k);
+  const alpha=active?.15:.07;
+  drawRoundRect(fctx,nd.x,nd.y,nd.w,nd.h,8,
+    `rgba(${hexToRgb(n.color)},${alpha})`,
+    active?n.color:`rgba(${hexToRgb(n.color)},.3)`,
+    active,n.glow);
+  // corner accents
+  const corner=6;
+  [[nd.x,nd.y],[nd.x+nd.w-corner,nd.y],[nd.x,nd.y+nd.h-corner],[nd.x+nd.w-corner,nd.y+nd.h-corner]].forEach(([cx,cy])=>{
+    fctx.strokeStyle=active?n.color:`rgba(${hexToRgb(n.color)},.3)`;
+    fctx.lineWidth=1;
+    fctx.strokeRect(cx,cy,corner,corner);
+  });
+
+  const fs=Math.max(10,Math.min(14, nd.w/9));
+  fctx.fillStyle=active?n.color:`rgba(${hexToRgb(n.color)},.55)`;
+  fctx.font=`700 ${fs}px 'Courier New',monospace`;
+  fctx.textAlign='center';
+  const lines=n.label.split('\n');
+  const lineH=fs+3;
+  const startY=nd.cy-((lines.length-1)*lineH/2)-(n.sub?lineH*.7:0);
+  lines.forEach((l,i)=>{fctx.fillText(l,nd.cx,startY+i*lineH);});
+
+  fctx.fillStyle=`rgba(${hexToRgb(n.color)},.45)`;
+  fctx.font=`${Math.max(9,fs-3)}px 'Courier New',monospace`;
+  if(n.sub) fctx.fillText(n.sub,nd.cx,startY+lines.length*lineH+2);
+
+  if(soc!=null){
+    const barW=nd.w*.7, barX=nd.cx-barW/2, barY=nd.y+nd.h-14;
+    fctx.fillStyle='rgba(0,0,0,.4)'; fctx.fillRect(barX,barY,barW,6);
+    const fill=Math.max(0,Math.min(1,soc/100));
+    const barG=fctx.createLinearGradient(barX,0,barX+barW*fill,0);
+    barG.addColorStop(0,fill<.2?'#ef4444':fill<.5?'#f59e0b':n.color);
+    barG.addColorStop(1,n.color);
+    fctx.fillStyle=barG; fctx.fillRect(barX,barY,barW*fill,6);
+    const pct=soc.toFixed(0)+'%';
+    fctx.fillStyle=n.color;fctx.font=`700 ${fs}px 'Courier New',monospace`;
+    fctx.fillText(pct,nd.cx,barY-4);
+  }
+}
+
+function spawnParticle(x1,y1,x2,y2,color){
+  const t=Math.random();
+  const midX=(x1+x2)/2+(Math.random()-.5)*20;
+  particles.push({x:x1,y:y1,tx:x2,ty:y2,mx:midX,my:(y1+y2)/2,progress:0,speed:.018+Math.random()*.015,color,size:2+Math.random()*2});
+}
+
+function drawFlowLine(x1,y1,x2,y2,color,active,label){
+  const alpha=active?.5:.1;
+  fctx.beginPath();fctx.moveTo(x1,y1);
+  const mx=(x1+x2)/2;
+  fctx.bezierCurveTo(mx,y1,mx,y2,x2,y2);
+  fctx.strokeStyle=`rgba(${hexToRgb(color)},${alpha})`;
+  fctx.lineWidth=active?2:1;
+  if(active){fctx.shadowColor=color;fctx.shadowBlur=8;}
+  fctx.stroke();
+  fctx.shadowBlur=0;
+  if(active&&label){
+    const lx=(x1+x2)/2, ly=(y1+y2)/2;
+    fctx.fillStyle=color;fctx.font='bold 9px Courier New';fctx.textAlign='center';
+    fctx.fillText(label,lx,ly-6);
+  }
+}
+
+function renderFlow(log){
+  const W=flowC.width, H=flowC.height;
+  fctx.clearRect(0,0,W,H);
+  if(W<10) return;
+
+  // Grid lines (subtle)
+  fctx.strokeStyle='rgba(129,140,248,.03)';fctx.lineWidth=1;
+  for(let x=0;x<W;x+=40){fctx.beginPath();fctx.moveTo(x,0);fctx.lineTo(x,H);fctx.stroke();}
+  for(let y=0;y<H;y+=40){fctx.beginPath();fctx.moveTo(0,y);fctx.lineTo(W,y);fctx.stroke();}
+
+  const ns=node('solar'),nr=node('reg'),nb=node('bat'),ne0=node('ev0'),ne1=node('ev1');
+
+  flowState.sToR    = log.solarRaw>.05;
+  flowState.rToBat  = log.toBat>.01;
+  flowState.rToEV0  = log.toEV[0]>.01;
+  flowState.rToEV1  = log.toEV[1]>.01;
+  flowState.batToEV = log.fromBat>.01;
+
+  // Draw flow lines
+  drawFlowLine(ns.cx+ns.w/2, ns.cy, nr.cx-nr.w/2, nr.cy, '#fbbf24', flowState.sToR, log.solarRaw.toFixed(1)+'kW');
+  drawFlowLine(nr.cx+nr.w/2, nr.cy-nr.h/4, nb.cx-nb.w/2, nb.cy, '#06d6a0', flowState.rToBat, log.toBat.toFixed(1)+'kW');
+  drawFlowLine(nr.cx+nr.w/2, nr.cy+nr.h/4, ne0.cx-ne0.w/2, ne0.cy, '#818cf8', flowState.rToEV0, log.toEV[0].toFixed(1)+'kW');
+  drawFlowLine(nr.cx+nr.w/2, nr.cy+nr.h/3, ne1.cx-ne1.w/2, ne1.cy, '#a78bfa', flowState.rToEV1, log.toEV[1].toFixed(1)+'kW');
+  // battery to EV arc
+  if(flowState.batToEV){
+    fctx.beginPath();fctx.moveTo(nb.cx,nb.cy+nb.h/2);
+    fctx.bezierCurveTo(nb.cx,nb.cy+nb.h,ne0.cx,nb.cy+nb.h,ne0.cx,ne0.cy-ne0.h/2);
+    fctx.strokeStyle=`rgba(251,113,133,.5)`;fctx.lineWidth=2;
+    fctx.shadowColor='#fb7185';fctx.shadowBlur=8;fctx.stroke();fctx.shadowBlur=0;
+    fctx.fillStyle='#fb7185';fctx.font='bold 9px Courier New';fctx.textAlign='center';
+    fctx.fillText(log.fromBat.toFixed(1)+'kW supplement',(nb.cx+ne0.cx)/2,nb.cy+nb.h+14);
+  }
+
+  // Spawn particles
+  if(flowState.sToR&&Math.random()<.35) spawnParticle(ns.cx+ns.w/2,ns.cy,nr.cx-nr.w/2,nr.cy,'#fbbf24');
+  if(flowState.rToBat&&Math.random()<.25) spawnParticle(nr.cx+nr.w/2,nr.cy-nr.h/4,nb.cx-nb.w/2,nb.cy,'#06d6a0');
+  if(flowState.rToEV0&&Math.random()<.25) spawnParticle(nr.cx+nr.w/2,nr.cy+nr.h/4,ne0.cx-ne0.w/2,ne0.cy,'#818cf8');
+  if(flowState.rToEV1&&Math.random()<.25) spawnParticle(nr.cx+nr.w/2,nr.cy+nr.h/3,ne1.cx-ne1.w/2,ne1.cy,'#a78bfa');
+
+  // Update + draw particles
+  particles=particles.filter(p=>{
+    p.progress+=p.speed;
+    if(p.progress>=1) return false;
+    const t=p.progress;
+    const px=(1-t)*(1-t)*p.x+2*(1-t)*t*p.mx+t*t*p.tx;
+    const py=(1-t)*(1-t)*p.y+2*(1-t)*t*p.my+t*t*p.ty;
+    fctx.beginPath();fctx.arc(px,py,p.size,0,Math.PI*2);
+    fctx.fillStyle=p.color;
+    fctx.shadowColor=p.color;fctx.shadowBlur=p.size*3;
+    fctx.fill();fctx.shadowBlur=0;
+    return true;
+  });
+  if(particles.length>120) particles=particles.slice(-80);
+
+  // Draw nodes
+  const batSoc=batE/BAT_CAP*100;
+  drawNode('solar',null,flowState.sToR);
+  drawNode('reg',null,flowState.sToR||flowState.rToBat||flowState.rToEV0||flowState.rToEV1);
+  drawNode('bat',batSoc,flowState.rToBat||flowState.batToEV);
+  drawNode('ev0',evConn[0]?evE[0]/EVS[0].cap*100:null,flowState.rToEV0||flowState.batToEV);
+  drawNode('ev1',evConn[1]?evE[1]/EVS[1].cap*100:null,flowState.rToEV1);
+}
+
+// Flow animation loop
+let flowRAF;
+function startFlowLoop(){
+  function loop(){
+    flowRAF=requestAnimationFrame(loop);
+    if(logs.length>0) renderFlow(logs[logs.length-1]);
+    else{
+      fctx.clearRect(0,0,flowC.width,flowC.height);
+      const emptyLog={hour:0,solarRaw:0,toEV:[0,0],toBat:0,fromBat:0,batSoc:batE/BAT_CAP*100,evSoc:[evE[0]/EVS[0].cap*100,evE[1]/EVS[1].cap*100],evConn:[false,false]};
+      renderFlow(emptyLog);
+    }
+  }
+  loop();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EV SPARKLINE CANVAS
+// ═══════════════════════════════════════════════════════════════════
+function drawSparkline(idx, color){
+  const cvs=document.getElementById('spark'+idx);
+  if(!cvs) return;
+  cvs.width=cvs.offsetWidth||300; cvs.height=40;
+  const ctx=cvs.getContext('2d');
+  ctx.clearRect(0,0,cvs.width,cvs.height);
+  const evLogs=logs.filter(l=>l.evConn[idx]);
+  if(evLogs.length<2) return;
+  const vals=evLogs.map(l=>l.evSoc[idx]);
+  const minV=Math.min(...vals), maxV=Math.max(...vals,minV+1);
+  const W=cvs.width, H=cvs.height;
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,`rgba(${hexToRgb(color)},.2)`);
+  grad.addColorStop(1,'transparent');
+  ctx.beginPath();
+  vals.forEach((v,i)=>{
+    const x=i/(vals.length-1)*W;
+    const y=H-((v-minV)/(maxV-minV))*H*.8-H*.1;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.stroke();
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CHARTS
+// ═══════════════════════════════════════════════════════════════════
+const HLABELS=Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
+const COPTS={responsive:true,animation:{duration:200},interaction:{mode:'index',intersect:false},
+  plugins:{legend:{labels:{color:'#8892b0',boxWidth:10,font:{size:10}}},tooltip:{backgroundColor:'#111528',titleColor:'#f0f4ff',bodyColor:'#8892b0',borderColor:'rgba(129,140,248,.2)',borderWidth:1}},
+  scales:{x:{ticks:{color:'#4a5568',maxTicksLimit:6,font:{size:9}},grid:{color:'rgba(255,255,255,.03)'},border:{color:'rgba(255,255,255,.06)'}},
+          y:{ticks:{color:'#4a5568',font:{size:9}},grid:{color:'rgba(255,255,255,.03)'},border:{color:'rgba(255,255,255,.06)'},min:0}}};
+const SOCOPTS={...COPTS,scales:{...COPTS.scales,y:{...COPTS.scales.y,max:105}}};
+
+const mainData={labels:HLABELS,datasets:[
+  {label:'Solar kW',data:[],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.1)',fill:true,tension:.4,pointRadius:0,borderWidth:2},
+  {label:'→ Bay A kW',data:[],borderColor:'#818cf8',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:1.5,borderDash:[3,2]},
+  {label:'→ Bay B kW',data:[],borderColor:'#a78bfa',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:1.5,borderDash:[3,2]},
+  {label:'→ Battery kW',data:[],borderColor:'#06d6a0',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:1.5,borderDash:[5,3]},
+]};
+const socData={labels:HLABELS,datasets:[
+  {label:'Battery %',data:[],borderColor:'#06d6a0',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:2},
+  {label:'Bay A %',data:[],borderColor:'#818cf8',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:1.5,borderDash:[3,2]},
+  {label:'Bay B %',data:[],borderColor:'#a78bfa',backgroundColor:'transparent',tension:.4,pointRadius:0,borderWidth:1.5,borderDash:[3,2]},
+]};
+
+let mainChart,socChart2;
+function initCharts(){
+  mainChart=new Chart(document.getElementById('mainChart'),{type:'line',data:mainData,options:COPTS});
+  socChart2=new Chart(document.getElementById('socChart'),{type:'line',data:socData,options:SOCOPTS});
+}
+function pushCharts(log){
+  mainData.datasets[0].data.push(+log.solarRaw.toFixed(2));
+  mainData.datasets[1].data.push(+log.toEV[0].toFixed(2));
+  mainData.datasets[2].data.push(+log.toEV[1].toFixed(2));
+  mainData.datasets[3].data.push(+log.toBat.toFixed(2));
+  socData.datasets[0].data.push(+log.batSoc.toFixed(1));
+  socData.datasets[1].data.push(log.evConn[0]?+log.evSoc[0].toFixed(1):null);
+  socData.datasets[2].data.push(log.evConn[1]?+log.evSoc[1].toFixed(1):null);
+  mainChart.update('none'); socChart2.update('none');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// UI UPDATES
+// ═══════════════════════════════════════════════════════════════════
+function updateStats(log){
+  const {solarRaw,toEV,toBat,fromBat,batSoc}=log;
+  const active=toEV[0]+toEV[1]+toBat;
+  setStatCard('solar',solarRaw.toFixed(2),'kW',`${(irr(log.hour)*100).toFixed(0)}% irradiance`,(solarRaw/SOLAR_PEAK)*100,'var(--solar)');
+  setStatCard('bat',batSoc.toFixed(1),'%',`${batE.toFixed(1)} / ${BAT_CAP} kWh`,batSoc,'var(--bat)');
+  setStatCard('active',active.toFixed(1),'kW',active>.1?`${toEV[0]+toEV[1]>0?'EV+':''}${toBat>0?'BAT':''} charging`:'No active flow',Math.min(100,active/10*100),'var(--ev)');
+  document.getElementById('chip-time').textContent=`${String(log.hour).padStart(2,'0')}:00`;
+  document.getElementById('hour-big').textContent=`${String(log.hour).padStart(2,'0')}:00`;
+  document.getElementById('prog-fill').style.width=((log.hour/23)*100)+'%';
+  document.getElementById('sv-total').innerHTML=totSolar.toFixed(1)+'<span class="stat-unit">kWh</span>';
+  document.getElementById('sb-total').style.width=Math.min(100,totSolar/40*100)+'%';
+}
+function setStatCard(id,val,unit,sub,barPct,color){
+  document.getElementById(`sv-${id}`).innerHTML=`${val}<span class="stat-unit">${unit}</span>`;
+  document.getElementById(`sv-${id}`).style.color=color;
+  if(document.getElementById(`ss-${id}`)) document.getElementById(`ss-${id}`).textContent=sub;
+  if(document.getElementById(`sb-${id}`)){document.getElementById(`sb-${id}`).style.width=Math.max(0,Math.min(100,barPct))+'%';document.getElementById(`sb-${id}`).style.background=color;}
+}
+
+function updateEVBays(log){
+  [0,1].forEach(i=>{
+    const ev=EVS[i], soc=evE[i]/ev.cap*100, conn=evConn[i];
+    const charging=conn&&log.toEV[i]>.01;
+    const full=evE[i]>=ev.cap*.99;
+    document.getElementById(`bay${i}-soc`).textContent=soc.toFixed(1);
+    document.getElementById(`bay${i}-kwh`).textContent=`${evE[i].toFixed(1)} kWh`;
+    document.getElementById(`bay${i}-bar`).style.width=soc.toFixed(0)+'%';
+    document.getElementById(`bay${i}-bar`).className='ev-soc-bar'+(full?' full':'');
+    const statusEl=document.getElementById(`bay${i}-status`);
+    const bayEl=document.getElementById(`bay${i}`);
+    if(!conn){statusEl.textContent='DISCONNECTED';statusEl.className='evbay-status s-disc';bayEl.className='ev-bay';}
+    else if(full){statusEl.textContent='FULL ✓';statusEl.className='evbay-status s-full';bayEl.className='ev-bay active';}
+    else if(charging){statusEl.textContent=`CHARGING ${log.toEV[i].toFixed(1)}kW`;statusEl.className='evbay-status s-chrg';bayEl.className='ev-bay charging';}
+    else{statusEl.textContent='CONNECTED';statusEl.className='evbay-status s-conn';bayEl.className='ev-bay active';}
+    const eta=conn&&!full?(((ev.cap-evE[i])/Math.max(.1,log.toEV[i]>0?log.toEV[i]:1))).toFixed(0)+'h to full':'';
+    document.getElementById(`bay${i}-eta`).textContent=conn?eta:`Arrives at ${String(ev.arrive).padStart(2,'0')}:00 · Departs ${String(ev.depart).padStart(2,'0')}:00`;
+    drawSparkline(i,['#818cf8','#a78bfa'][i]);
+  });
+}
+
+function updateScene(log){
+  // handled in drawScene loop
+}
+
+function updateSummary(){
+  document.getElementById('sum-solar').textContent=totSolar.toFixed(1)+' kWh';
+  document.getElementById('sum-ev').textContent=totToEV.toFixed(1)+' kWh';
+  document.getElementById('sum-bat').textContent=totToBat.toFixed(1)+' kWh';
+  const eff=totSolar>0?(totToEV+totToBat)/totSolar*100:0;
+  document.getElementById('sum-eff').textContent=eff.toFixed(0)+'%';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// LOG FEED
+// ═══════════════════════════════════════════════════════════════════
+function addLog(msg,cls=''){
+  const feed=document.getElementById('log-feed');
+  const div=document.createElement('div');
+  div.className='log-entry'+(cls?' '+cls:'');
+  div.innerHTML=`<span class="log-time">${String(hour).padStart(2,'0')}:00</span><span>${msg}</span>`;
+  feed.appendChild(div);
+  feed.scrollTop=feed.scrollHeight;
+  if(feed.children.length>80) feed.removeChild(feed.firstChild);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════
+let notifTimer;
+function showNotif(title,sub,color){
+  const n=document.getElementById('notif');
+  document.getElementById('notif-title').textContent=title;
+  document.getElementById('notif-sub').textContent=sub;
+  n.style.borderColor=color;
+  document.getElementById('notif-title').style.color=color;
+  n.classList.add('show');
+  clearTimeout(notifTimer);
+  notifTimer=setTimeout(()=>n.classList.remove('show'),3200);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PLAYBACK
+// ═══════════════════════════════════════════════════════════════════
+function getDelay(){return 2000;}
+function play(){
+  playing=true;
+  document.getElementById('play-btn').textContent='⏸ PAUSE';
+  document.getElementById('play-btn').className='btn btn-play paused';
+  document.getElementById('sim-status-chip').textContent='● LIVE';
+  document.getElementById('sim-status-chip').className='chip chip-sim';
+  timer=setInterval(step,getDelay());
+  addLog('Simulation started','warn');
+}
+function pause(){
+  playing=false;clearInterval(timer);timer=null;
+  document.getElementById('play-btn').textContent='▶ PLAY';
+  document.getElementById('play-btn').className='btn btn-play';
+  document.getElementById('sim-status-chip').textContent=hour>=24?'● DONE':'● PAUSED';
+}
+function togglePlay(){playing?pause():(hour<24?play():null);}
+function setSpd(s){speed=s;}
+function changeWeather(){weatherKey=document.getElementById('weather-sel').value;addLog(`Weather changed → ${PROFILES[weatherKey].name}`,'warn');}
+
+function resetSim(){
+  pause();resetState();
+  particles=[];
+  mainData.datasets.forEach(d=>d.data=[]);
+  socData.datasets.forEach(d=>d.data=[]);
+  mainChart.update();socChart2.update();
+  document.getElementById('hour-big').textContent='00:00';
+  document.getElementById('chip-time').textContent='00:00';
+  document.getElementById('prog-fill').style.width='0%';
+  document.getElementById('log-feed').innerHTML='<div class="log-entry"><span class="log-time">--:--</span><span>System reset. Ready.</span></div>';
+  document.getElementById('sim-status-chip').textContent='● READY';
+  [0,1].forEach(i=>{
+    document.getElementById(`bay${i}-soc`).textContent=EVS[i].initSoc*100;
+    document.getElementById(`bay${i}-bar`).style.width=(EVS[i].initSoc*100)+'%';
+    document.getElementById(`bay${i}-status`).textContent='DISCONNECTED';
+    document.getElementById(`bay${i}-status`).className='evbay-status s-disc';
+    document.getElementById(`bay${i}`).className='ev-bay';
+  });
+  updateSummary();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// UTIL
+// ═══════════════════════════════════════════════════════════════════
+function hexToRgb(hex){
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `${r},${g},${b}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+window.addEventListener('resize',()=>{
+  initScene(); resizeFlow();
+  if(logs.length) renderFlow(logs[logs.length-1]);
+});
+
+resetState();
+initScene();
+resizeFlow();
+initCharts();
+startSceneLoop();
+startFlowLoop();
+</script>
+</body>
+</html>
